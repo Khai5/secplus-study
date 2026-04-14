@@ -1,10 +1,10 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:       #0a0c10;
-  --bg2:      #111418;
-  --bg3:      #181c22;
-  --bg4:      #1e2329;
+  --bg:       #1a1d2e;
+  --bg2:      #1e2235;
+  --bg3:      #23283d;
+  --bg4:      #282d42;
   --border:   rgba(255,255,255,0.07);
   --border2:  rgba(255,255,255,0.13);
   --text:     #dde1ea;
@@ -159,9 +159,47 @@ input[type=range]::-webkit-slider-thumb {
 .range-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .range-val { font-family: var(--mono); font-size: 14px; color: var(--green); min-width: 30px; text-align: right; }
 
+/* Domain checkbox group */
+.domain-check-group { display: flex; flex-direction: column; gap: 5px; }
+.domain-check-item {
+  display: flex; align-items: center; gap: 8px;
+  cursor: pointer; padding: 2px 0;
+}
+.domain-check-item input[type=checkbox] {
+  -webkit-appearance: none; appearance: none;
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 1px solid var(--border2); border-radius: 3px;
+  background: var(--bg4); cursor: pointer; position: relative;
+  transition: background 0.12s, border-color 0.12s;
+}
+.domain-check-item input[type=checkbox]:checked { background: var(--green); border-color: var(--green); }
+.domain-check-item input[type=checkbox]:checked::after {
+  content: ''; position: absolute;
+  left: 3px; top: 1px; width: 5px; height: 8px;
+  border: 2px solid #12131a; border-top: none; border-left: none;
+  transform: rotate(45deg);
+}
+.domain-check-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+}
+.dot-general { background: #4a9eff; }
+.dot-threats { background: #f04f5f; }
+.dot-arch    { background: #39d98a; }
+.dot-ops     { background: #f5a623; }
+.dot-gov     { background: #a78bfa; }
+.domain-check-label { font-size: 13px; color: var(--text2); user-select: none; }
+.domain-check-item:hover .domain-check-label { color: var(--text); }
+.domain-toggle-row { margin-top: 7px; }
+.domain-toggle-btn {
+  background: none; border: none; font-family: var(--mono); font-size: 11px;
+  color: var(--text3); cursor: pointer; padding: 0; letter-spacing: 0.05em;
+  transition: color 0.12s;
+}
+.domain-toggle-btn:hover { color: var(--text2); }
+
 .btn {
   font-family: var(--mono); font-size: 13px;
-  background: var(--green); color: #0a0c10;
+  background: var(--green); color: #12131a;
   border: none; padding: 10px 22px; border-radius: var(--radius);
   cursor: pointer; font-weight: 700; transition: all 0.15s; letter-spacing: 0.03em;
 }
