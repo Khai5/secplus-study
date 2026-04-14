@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Security+ Study Hub — SY0-701</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <nav id="nav">
+      <div class="nav-logo">SEC<span>+</span></div>
+      <div class="nav-links">
+        <button class="nav-btn active" data-view="home">Home</button>
+        <button class="nav-btn" data-view="quiz">Practice Quiz</button>
+        <button class="nav-btn" data-view="flashcards">Flashcards</button>
+        <button class="nav-btn" data-view="dictionary">Dictionary</button>
+        <button class="nav-btn" data-view="progress">Progress</button>
+      </div>
+      <button class="nav-hamburger" id="hamburger" aria-label="Menu">&#9776;</button>
+    </nav>
+
+    <div id="mobile-menu" class="mobile-menu hidden">
+      <button class="mob-btn" data-view="home">Home</button>
+      <button class="mob-btn" data-view="quiz">Practice Quiz</button>
+      <button class="mob-btn" data-view="flashcards">Flashcards</button>
+      <button class="mob-btn" data-view="dictionary">Dictionary</button>
+      <button class="mob-btn" data-view="progress">Progress</button>
+    </div>
+
+    <main id="main"></main>
+  </div>
+
+  <script src="data-terms.js"></script>
+  <script src="data-questions.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
