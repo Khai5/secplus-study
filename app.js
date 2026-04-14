@@ -3,7 +3,8 @@ const state = {
   view: 'home',
   quiz: {
     questions: [], current: 0, answers: [], started: false, finished: false,
-    timer: null, seconds: 0, domain: 'all', count: 20,
+    timer: null, seconds: 0,
+    domains: ['general','threats','arch','ops','gov'], count: 20,
   },
   fc: {
     cards: [], index: 0, flipped: false,
@@ -127,26 +128,41 @@ function renderQuiz() {
 }
 
 function renderQuizSetup() {
+  const sel = state.quiz.domains;
+  const initPool = QUESTIONS.filter(q => sel.includes(q.cat));
+  const initMax  = Math.max(initPool.length, 5);
+  const initVal  = Math.min(state.quiz.count || 20, initMax);
+  const domains  = [
+    { val:'general', label:'General concepts',        dot:'dot-general' },
+    { val:'threats', label:'Threats &amp; attacks',   dot:'dot-threats' },
+    { val:'arch',    label:'Architecture',             dot:'dot-arch' },
+    { val:'ops',     label:'Operations',               dot:'dot-ops' },
+    { val:'gov',     label:'Governance &amp; compliance', dot:'dot-gov' },
+  ];
   return `
   <p class="section-title">Practice quiz</p>
   <div class="quiz-setup">
     <div class="setup-grid">
       <div class="setup-card">
-        <div class="setup-label">DOMAIN</div>
-        <select id="q-domain">
-          <option value="all">All domains</option>
-          <option value="general">General concepts</option>
-          <option value="threats">Threats &amp; attacks</option>
-          <option value="arch">Architecture</option>
-          <option value="ops">Operations</option>
-          <option value="gov">Governance &amp; compliance</option>
-        </select>
+        <div class="setup-label">DOMAINS</div>
+        <div class="domain-check-group">
+          ${domains.map(d => `
+          <label class="domain-check-item">
+            <input type="checkbox" class="domain-cb" value="${d.val}" ${sel.includes(d.val)?'checked':''} onchange="updateDomainState()">
+            <span class="domain-check-dot ${d.dot}"></span>
+            <span class="domain-check-label">${d.label}</span>
+          </label>`).join('')}
+        </div>
+        <div class="domain-toggle-row">
+          <button class="domain-toggle-btn" onclick="toggleAllDomains()">select all / none</button>
+        </div>
       </div>
       <div class="setup-card">
-        <div class="setup-label">NUMBER OF QUESTIONS — <span id="q-count-lbl">20</span></div>
+        <div class="setup-label">NUMBER OF QUESTIONS</div>
         <div class="range-row">
-          <input type="range" id="q-count" min="5" max="${QUESTIONS.length}" value="20" step="5" oninput="document.getElementById('q-count-lbl').textContent=this.value">
-          <span class="range-val" id="q-count-display">20</span>
+          <input type="range" id="q-count" min="5" max="${initMax}" value="${initVal}" step="5"
+            oninput="document.getElementById('q-count-display').textContent=this.value">
+          <span class="range-val" id="q-count-display">${initVal}</span>
         </div>
       </div>
     </div>
@@ -166,16 +182,50 @@ function renderQuizSetup() {
       </div>`).join('')}`;
 }
 
+function updateDomainState() {
+  const checks = document.querySelectorAll('.domain-cb:checked');
+  const domains = Array.from(checks).map(c => c.value);
+  state.quiz.domains = domains;
+  const pool = QUESTIONS.filter(q => domains.includes(q.cat));
+  const slider = document.getElementById('q-count');
+  const disp   = document.getElementById('q-count-display');
+  if (slider) {
+    const max = Math.max(pool.length, 5);
+    slider.max = max;
+    const clamped = Math.min(parseInt(slider.value) || 5, max);
+    const stepped = Math.max(5, Math.round(clamped / 5) * 5);
+    const final = Math.min(stepped, max);
+    slider.value = final;
+    if (disp) disp.textContent = final;
+  }
+}
+
+function toggleAllDomains() {
+  const checks = document.querySelectorAll('.domain-cb');
+  const allChecked = Array.from(checks).every(c => c.checked);
+  checks.forEach(c => { c.checked = !allChecked; });
+  updateDomainState();
+}
+
 function startQuiz() {
-  const domain = document.getElementById('q-domain').value;
-  const count  = parseInt(document.getElementById('q-count').value);
-  const pool   = domain === 'all' ? QUESTIONS : QUESTIONS.filter(q => q.cat === domain);
+  const checks = document.querySelectorAll('.domain-cb:checked');
+  const domains = Array.from(checks).map(c => c.value);
+  if (domains.length === 0) { alert('Please select at least one domain.'); return; }
+
+  const count = parseInt(document.getElementById('q-count').value);
+  const pool  = QUESTIONS.filter(q => domains.includes(q.cat));
   const selected = shuffle(pool).slice(0, Math.min(count, pool.length));
+
+  const allKeys = ['general','threats','arch','ops','gov'];
+  const domainLabel = domains.length === allKeys.length
+    ? 'All domains'
+    : domains.map(d => DOMAIN_META[d]?.label || d).join(', ');
 
   state.quiz = {
     questions: selected, current: 0, answers: new Array(selected.length).fill(null),
     started: true, finished: false, timer: null,
-    seconds: selected.length * 60, domain, count: selected.length,
+    seconds: selected.length * 60,
+    domains, domainLabel, count: selected.length,
   };
 
   startTimer();
@@ -250,10 +300,9 @@ function finishQuiz() {
   q.questions.forEach((qi,i) => { if (q.answers[i] === qi.answer) correct++; });
   const pct = Math.round((correct / q.questions.length) * 100);
 
-  const domainLabel = q.domain === 'all' ? 'All domains' : DOMAIN_META[q.domain]?.label || q.domain;
   state.progress.sessions.push({
     date: new Date().toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}),
-    count: q.questions.length, domain: domainLabel, pct, correct,
+    count: q.questions.length, domain: q.domainLabel || 'All domains', pct, correct,
   });
   saveProgress();
   render();
