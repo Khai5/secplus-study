@@ -11,7 +11,23 @@ const state = {
     domain: 'all', known: new Set(), unknown: new Set(),
   },
   dict: { query: '', domain: 'all' },
-  progress: JSON.parse(localStorage.getItem('sp_progress') || '{"sessions":[],"fcStats":{}}'),
+  wm: {
+    // settings (persist across rounds)
+    domains: ['general','threats','arch','ops','gov'],
+    randomize: true,
+    bankSize: 8,
+    // game state
+    started: false, finished: false,
+    pairs: [], defOrder: [],
+    selectedTerm: null, selectedDef: null,
+    matched: new Set(),
+    wrongTerm: null, wrongDef: null,
+    mistakes: 0, startTime: null, elapsedSeconds: 0,
+  },
+  progress: (() => {
+    const p = JSON.parse(localStorage.getItem('sp_progress') || '{}');
+    return { sessions: p.sessions||[], fcStats: p.fcStats||{}, wmStats: p.wmStats||{} };
+  })(),
 };
 
 function saveProgress() {
@@ -65,6 +81,7 @@ function render() {
     case 'quiz':       main.innerHTML = renderQuiz(); bindQuiz(); break;
     case 'flashcards': main.innerHTML = renderFlashcards(); bindFlashcards(); break;
     case 'dictionary': main.innerHTML = renderDictionary(); bindDict(); break;
+    case 'wordmatch':  main.innerHTML = renderWordMatch(); bindWordMatch(); break;
     case 'progress':   main.innerHTML = renderProgress(); break;
   }
 }
@@ -106,6 +123,11 @@ function renderHome() {
       <div class="feature-icon">▦</div>
       <div class="feature-title">Dictionary</div>
       <div class="feature-desc">Search and filter all ${TERMS.length} terms and abbreviations used in the SY0-701 exam.</div>
+    </div>
+    <div class="feature-card" onclick="navigate('wordmatch')">
+      <div class="feature-icon">⬡</div>
+      <div class="feature-title">Word match</div>
+      <div class="feature-desc">Match terms to their definitions. Configure topics, randomization, and bank size to build custom practice rounds.</div>
     </div>
     <div class="feature-card" onclick="navigate('progress')">
       <div class="feature-icon">◉</div>
@@ -596,6 +618,29 @@ function renderProgress() {
     </div>`;
   }).join('')}` : ''}
 
+  ${(() => {
+    const ws = state.progress.wmStats;
+    const played = ws.played || 0;
+    if (played === 0) return '';
+    return `
+  <p class="section-title" style="margin-top:2rem">Word match</p>
+  <div class="progress-grid">
+    <div class="prog-card">
+      <div class="prog-title">GAMES PLAYED</div>
+      <div class="prog-val">${played}</div>
+    </div>
+    <div class="prog-card">
+      <div class="prog-title">BEST ACCURACY</div>
+      <div class="prog-val" style="color:${ws.bestAccuracy>=80?'var(--green)':ws.bestAccuracy>=60?'var(--amber)':'var(--red)'}">${ws.bestAccuracy !== null && ws.bestAccuracy !== undefined ? ws.bestAccuracy+'%' : '—'}</div>
+      <div class="prog-sub">${ws.bestAccuracy>=80?'Great recall ✓':'Keep practising'}</div>
+    </div>
+    <div class="prog-card">
+      <div class="prog-title">BEST TIME</div>
+      <div class="prog-val">${ws.bestTime !== null && ws.bestTime !== undefined ? fmt(ws.bestTime) : '—'}</div>
+    </div>
+  </div>`;
+  })()}
+
   <p class="section-title" style="margin-top:2rem">Quiz history</p>
   ${sessions.length === 0
     ? `<div class="empty-state"><div class="empty-icon">◎</div><p>Take a quiz to see your history here</p></div>`
@@ -616,6 +661,290 @@ function clearProgress() {
   saveProgress();
   render();
 }
+
+// ── WORD MATCH ─────────────────────────────────────────────────
+function renderWordMatch() {
+  const wm = state.wm;
+  if (!wm.started)  return renderWordMatchSetup();
+  if (wm.finished)  return renderWordMatchResults();
+  return renderWordMatchGame();
+}
+
+function renderWordMatchSetup() {
+  const wm = state.wm;
+  const pool = TERMS.filter(t => wm.domains.includes(t.cat));
+  const maxBank = Math.min(pool.length, 20);
+  const bankSize = Math.min(wm.bankSize, Math.max(maxBank, 4));
+  const domains = [
+    { val:'general', label:'General concepts',            dot:'dot-general' },
+    { val:'threats', label:'Threats &amp; attacks',       dot:'dot-threats' },
+    { val:'arch',    label:'Architecture',                 dot:'dot-arch' },
+    { val:'ops',     label:'Operations',                   dot:'dot-ops' },
+    { val:'gov',     label:'Governance &amp; compliance',  dot:'dot-gov' },
+  ];
+
+  return `
+  <p class="section-title">Word match</p>
+  <div class="wm-setup">
+    <div class="setup-grid">
+      <div class="setup-card">
+        <div class="setup-label">TOPICS</div>
+        <div class="domain-check-group">
+          ${domains.map(d => `
+          <label class="domain-check-item">
+            <input type="checkbox" class="wm-domain-cb" value="${d.val}" ${wm.domains.includes(d.val)?'checked':''} onchange="wmUpdateDomains()">
+            <span class="domain-check-dot ${d.dot}"></span>
+            <span class="domain-check-label">${d.label}</span>
+          </label>`).join('')}
+        </div>
+        <div class="domain-toggle-row">
+          <button class="domain-toggle-btn" onclick="wmToggleAllDomains()">select all / none</button>
+        </div>
+      </div>
+      <div class="setup-card">
+        <div class="setup-label">BANK SIZE</div>
+        <div class="range-row">
+          <input type="range" id="wm-bank-size" min="4" max="${maxBank}" value="${bankSize}" step="1"
+            oninput="document.getElementById('wm-bank-display').textContent=this.value">
+          <span class="range-val" id="wm-bank-display">${bankSize}</span>
+        </div>
+        <div id="wm-avail-count" style="font-size:12px;color:var(--text3);margin-top:6px">${pool.length} terms available</div>
+
+        <div class="setup-label" style="margin-top:1.25rem">OPTIONS</div>
+        <label class="domain-check-item">
+          <input type="checkbox" id="wm-randomize" ${wm.randomize?'checked':''}
+            onchange="state.wm.randomize=this.checked">
+          <span class="domain-check-label">Randomize word selection each round</span>
+        </label>
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn" onclick="startWordMatch()">Start matching →</button>
+    </div>
+  </div>`;
+}
+
+function wmUpdateDomains() {
+  const checks = document.querySelectorAll('.wm-domain-cb:checked');
+  state.wm.domains = Array.from(checks).map(c => c.value);
+  const pool = TERMS.filter(t => state.wm.domains.includes(t.cat));
+  const slider = document.getElementById('wm-bank-size');
+  const disp   = document.getElementById('wm-bank-display');
+  if (slider) {
+    const max = Math.min(pool.length, 20);
+    slider.max = max || 4;
+    const clamped = Math.min(parseInt(slider.value)||4, max || 4);
+    slider.value = clamped;
+    if (disp) disp.textContent = clamped;
+  }
+  const avail = document.getElementById('wm-avail-count');
+  if (avail) avail.textContent = `${pool.length} terms available`;
+}
+
+function wmToggleAllDomains() {
+  const checks = document.querySelectorAll('.wm-domain-cb');
+  const allChecked = Array.from(checks).every(c => c.checked);
+  checks.forEach(c => { c.checked = !allChecked; });
+  wmUpdateDomains();
+}
+
+function startWordMatch() {
+  const checks = document.querySelectorAll('.wm-domain-cb:checked');
+  const domains = Array.from(checks).map(c => c.value);
+  if (domains.length === 0) { alert('Please select at least one topic.'); return; }
+
+  const bankSize = parseInt(document.getElementById('wm-bank-size').value) || 8;
+  const randomize = document.getElementById('wm-randomize')?.checked ?? state.wm.randomize;
+  state.wm.domains = domains;
+  state.wm.bankSize = bankSize;
+  state.wm.randomize = randomize;
+
+  const pool = TERMS.filter(t => domains.includes(t.cat));
+  const selected = randomize ? shuffle(pool).slice(0, bankSize) : pool.slice(0, bankSize);
+  const defOrder = shuffle([...Array(selected.length).keys()]);
+
+  state.wm = {
+    ...state.wm,
+    started: true, finished: false,
+    pairs: selected, defOrder,
+    selectedTerm: null, selectedDef: null,
+    matched: new Set(),
+    wrongTerm: null, wrongDef: null,
+    mistakes: 0, startTime: Date.now(), elapsedSeconds: 0,
+  };
+  render();
+}
+
+function playAgainWordMatch() {
+  const wm = state.wm;
+  const pool = TERMS.filter(t => wm.domains.includes(t.cat));
+  const selected = wm.randomize ? shuffle(pool).slice(0, wm.bankSize) : pool.slice(0, wm.bankSize);
+  const defOrder = shuffle([...Array(selected.length).keys()]);
+
+  state.wm = {
+    ...state.wm,
+    started: true, finished: false,
+    pairs: selected, defOrder,
+    selectedTerm: null, selectedDef: null,
+    matched: new Set(),
+    wrongTerm: null, wrongDef: null,
+    mistakes: 0, startTime: Date.now(), elapsedSeconds: 0,
+  };
+  render();
+}
+
+function renderWordMatchGame() {
+  const wm = state.wm;
+  const pct = Math.round((wm.matched.size / wm.pairs.length) * 100);
+
+  const termsHtml = wm.pairs.map((pair, i) => {
+    let cls = 'wm-item wm-term';
+    const isMatched  = wm.matched.has(i);
+    const isSelected = wm.selectedTerm === i;
+    const isWrong    = wm.wrongTerm === i;
+    if (isMatched)       cls += ' wm-matched';
+    else if (isWrong)    cls += ' wm-wrong';
+    else if (isSelected) cls += ' wm-selected';
+    const clickable = !isMatched && wm.wrongTerm === null;
+    return `<div class="${cls}"${clickable ? ` onclick="wmSelectTerm(${i})"` : ''}>${esc(pair.t)}</div>`;
+  }).join('');
+
+  const defsHtml = wm.defOrder.map((pairIdx, defPos) => {
+    const pair = wm.pairs[pairIdx];
+    let cls = 'wm-item wm-def';
+    const isMatched  = wm.matched.has(pairIdx);
+    const isSelected = wm.selectedDef === defPos;
+    const isWrong    = wm.wrongDef === defPos;
+    if (isMatched)       cls += ' wm-matched';
+    else if (isWrong)    cls += ' wm-wrong';
+    else if (isSelected) cls += ' wm-selected';
+    const clickable = !isMatched && wm.wrongTerm === null;
+    return `<div class="${cls}"${clickable ? ` onclick="wmSelectDef(${defPos})"` : ''}>${esc(pair.d)}</div>`;
+  }).join('');
+
+  return `
+  <p class="section-title">Word match</p>
+  <div class="wm-progress-bar"><div class="wm-progress-fill" style="width:${pct}%"></div></div>
+  <div class="wm-game-meta">
+    <span><span style="color:var(--text3)">${wm.pairs.length} pairs</span> · <span style="color:var(--red)">${wm.mistakes} mistake${wm.mistakes!==1?'s':''}</span></span>
+    <span style="color:var(--green);font-family:var(--mono);font-size:12px">✓ ${wm.matched.size} / ${wm.pairs.length}</span>
+  </div>
+  <div class="wm-columns">
+    <div class="wm-col">
+      <div class="wm-col-label">TERMS</div>
+      ${termsHtml}
+    </div>
+    <div class="wm-col">
+      <div class="wm-col-label">DEFINITIONS</div>
+      ${defsHtml}
+    </div>
+  </div>
+  <div class="btn-row" style="margin-top:1.5rem">
+    <button class="btn-ghost" onclick="state.wm.started=false;state.wm.finished=false;render()">← Settings</button>
+  </div>`;
+}
+
+function wmSelectTerm(pairIdx) {
+  const wm = state.wm;
+  if (wm.matched.has(pairIdx) || wm.wrongTerm !== null) return;
+  if (wm.selectedTerm === pairIdx) { wm.selectedTerm = null; render(); return; }
+  wm.selectedTerm = pairIdx;
+  if (wm.selectedDef !== null) { wmTryMatch(); return; }
+  render();
+}
+
+function wmSelectDef(defPos) {
+  const wm = state.wm;
+  if (wm.matched.has(wm.defOrder[defPos]) || wm.wrongTerm !== null) return;
+  if (wm.selectedDef === defPos) { wm.selectedDef = null; render(); return; }
+  wm.selectedDef = defPos;
+  if (wm.selectedTerm !== null) { wmTryMatch(); return; }
+  render();
+}
+
+function wmTryMatch() {
+  const wm = state.wm;
+  const termIdx  = wm.selectedTerm;
+  const defPos   = wm.selectedDef;
+  const defPairIdx = wm.defOrder[defPos];
+
+  if (termIdx === defPairIdx) {
+    // Correct match
+    wm.matched.add(termIdx);
+    wm.selectedTerm = null;
+    wm.selectedDef  = null;
+
+    if (wm.matched.size === wm.pairs.length) {
+      // All matched — finish
+      wm.finished = true;
+      wm.elapsedSeconds = Math.round((Date.now() - wm.startTime) / 1000);
+      const accuracy = wm.mistakes === 0
+        ? 100
+        : Math.round((wm.pairs.length / (wm.pairs.length + wm.mistakes)) * 100);
+      const ws = state.progress.wmStats;
+      ws.played = (ws.played || 0) + 1;
+      if (ws.bestTime === undefined || ws.bestTime === null || wm.elapsedSeconds < ws.bestTime)
+        ws.bestTime = wm.elapsedSeconds;
+      if (ws.bestAccuracy === undefined || ws.bestAccuracy === null || accuracy > ws.bestAccuracy)
+        ws.bestAccuracy = accuracy;
+      saveProgress();
+    }
+    render();
+  } else {
+    // Wrong match
+    wm.wrongTerm = termIdx;
+    wm.wrongDef  = defPos;
+    wm.mistakes++;
+    wm.selectedTerm = null;
+    wm.selectedDef  = null;
+    render();
+    setTimeout(() => {
+      state.wm.wrongTerm = null;
+      state.wm.wrongDef  = null;
+      render();
+    }, 800);
+  }
+}
+
+function renderWordMatchResults() {
+  const wm = state.wm;
+  const accuracy = wm.mistakes === 0
+    ? 100
+    : Math.round((wm.pairs.length / (wm.pairs.length + wm.mistakes)) * 100);
+  const ws = state.progress.wmStats;
+
+  return `
+  <div class="results-card">
+    <div class="results-score" style="color:var(--green);font-size:2.5rem">✓</div>
+    <div class="results-label">All ${wm.pairs.length} pairs matched · ${wm.mistakes} mistake${wm.mistakes!==1?'s':''} · ${fmt(wm.elapsedSeconds)} taken</div>
+    <div class="results-grid">
+      <div class="res-box">
+        <span class="res-num" style="color:${accuracy>=80?'var(--green)':accuracy>=60?'var(--amber)':'var(--red)'}">${accuracy}%</span>
+        <span class="res-lbl">Accuracy</span>
+      </div>
+      <div class="res-box">
+        <span class="res-num" style="color:${wm.mistakes===0?'var(--green)':'var(--red)'}">${wm.mistakes}</span>
+        <span class="res-lbl">Mistakes</span>
+      </div>
+      <div class="res-box">
+        <span class="res-num">${fmt(wm.elapsedSeconds)}</span>
+        <span class="res-lbl">Time</span>
+      </div>
+    </div>
+    ${(ws.played||0) > 1 ? `
+    <div class="wm-best-row">
+      <span>Best accuracy <span style="color:var(--green)">${ws.bestAccuracy}%</span></span>
+      <span>Best time <span style="color:var(--green)">${fmt(ws.bestTime)}</span></span>
+      <span>Games played <span style="color:var(--green)">${ws.played}</span></span>
+    </div>` : ''}
+  </div>
+  <div class="btn-row">
+    <button class="btn" onclick="playAgainWordMatch()">Play again</button>
+    <button class="btn-ghost" onclick="state.wm.started=false;state.wm.finished=false;render()">Settings</button>
+  </div>`;
+}
+
+function bindWordMatch() {}
 
 // ── INIT ───────────────────────────────────────────────────────
 render();
